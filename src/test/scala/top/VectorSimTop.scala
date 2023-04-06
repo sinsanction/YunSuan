@@ -53,6 +53,7 @@ class VSTInputIO extends VPUTestBundle {
   val src_widen = Bool()
   val widen = Bool()
   val is_frs1 = Bool()
+  val is_frs2 = Bool()
 
   val rm = UInt(3.W)
   val rm_s = UInt(2.W)
@@ -108,9 +109,9 @@ class SimTop() extends VPUTestModule {
   val finish_uncertain = Wire(Bool())
   val is_uncertain = (in.fuType === VPUTestFuType.vfd)
 
-  val (sew, uop_idx, rm, rm_s, fuType, opcode, src_widen, widen, is_frs1) = (
+  val (sew, uop_idx, rm, rm_s, fuType, opcode, src_widen, widen, is_frs1, is_frs2) = (
     in.sew, in.uop_idx, in.rm, in.rm_s, in.fuType, in.fuOpType,
-    in.src_widen, in.widen, in.is_frs1
+    in.src_widen, in.widen, in.is_frs1, in.is_frs2
   )
 
   val (vstart, vl, vlmul, vm, ta, ma) = (
@@ -140,7 +141,8 @@ class SimTop() extends VPUTestModule {
     require(vfa.io.fp_a.getWidth == XLEN)
     vfa.io.fp_a := src1
     vfa.io.fp_b := src2
-    // Cat(vs2(95,64),vs2(31,0)) or Cat(vs2(127,96),vs2(63,32))
+    //io.widen_a Cat(vs2(95,64),vs2(31,0)) or Cat(vs2(127,96),vs2(63,32))
+    //io.widen_b Cat(vs1(95,64),vs1(31,0)) or Cat(vs1(127,96),vs1(63,32))
     vfa.io.widen_a := Cat(in.src(0)(1)(31+i*32,0+i*32),in.src(0)(0)(31+i*32,0+i*32))
     vfa.io.widen_b := Cat(in.src(1)(1)(31+i*32,0+i*32),in.src(1)(0)(31+i*32,0+i*32))
     vfa.io.frs1  := in.src(1)(0) // VS1(63,0)
@@ -166,6 +168,11 @@ class SimTop() extends VPUTestModule {
     vfd.io.fp_format_i := sew
     vfd.io.opa_i := src1
     vfd.io.opb_i := src2
+    vfd.io.frs2_i := in.src(0)(0) // VS2(63,0)
+    vfd.io.frs1_i := in.src(1)(0) // VS1(63,0)
+    vfd.io.is_frs2_i := is_frs2
+    vfd.io.is_frs1_i := is_frs1
+    vfd.io.is_sqrt_i := false.B
     vfd.io.rm_i := rm
     vfd.io.is_vec_i := true.B // TODO: check it
     vfd.io.finish_ready_i := !vfd_result_valid(i) && busy
@@ -202,6 +209,11 @@ class SimTop() extends VPUTestModule {
     vff.io.fp_a := src1
     vff.io.fp_b := src2
     vff.io.fp_c := src3
+    //io.widen_a Cat(vs2(95,64),vs2(31,0)) or Cat(vs2(127,96),vs2(63,32))
+    //io.widen_b Cat(vs1(95,64),vs1(31,0)) or Cat(vs1(127,96),vs1(63,32))
+    vff.io.widen_a := Cat(in.src(0)(1)(31+i*32,0+i*32),in.src(0)(0)(31+i*32,0+i*32))
+    vff.io.widen_b := Cat(in.src(1)(1)(31+i*32,0+i*32),in.src(1)(0)(31+i*32,0+i*32))
+    vff.io.uop_idx := uop_idx(0)
     vff.io.frs1  := in.src(1)(0) // VS1(63,0)
     vff.io.round_mode := rm
     vff.io.fp_format := sew

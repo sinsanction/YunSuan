@@ -60,7 +60,10 @@ uint8_t TestDriver::gen_random_optype() {
       return vffma_all_optype[rand() % VFF_NUM];
       break;
       }
-    case VFloatDivider: break;
+    case VFloatDivider: {
+      return VFDIV;
+      break;
+    }
     case VIntegerALU: break;
     case VPermutation: { //TODO: add other type
       uint8_t vperm_all_optype[6] = {VSLIDEUP,VSLIDEDOWN,VSLIDE1UP,VSLIDE1DOWN,VRGATHER,VRGATHERRS1};
@@ -97,7 +100,13 @@ bool TestDriver::gen_random_widen() {
         if( input.fuOpType == VFADD || input.fuOpType == VFSUB )  return rand()%2 == 1; 
         else return false;
         break;
-        }
+      }
+      case VFloatFMA: {
+        if(input.fuOpType==VFMUL || input.fuOpType==VFMACC || input.fuOpType==VFNMACC || input.fuOpType==VFMSAC || input.fuOpType==VFNMSAC) 
+          return rand()%2 == 1;
+        else return false;
+        break;
+      }
       default: return false; break;
     }
   }
@@ -130,6 +139,20 @@ bool TestDriver::gen_random_is_frs1() {
       uint8_t need_frs1_ops[] = VFF_NEED_FRS1_OPTYPES;
       bool need_frs1 = std::find(std::begin(need_frs1_ops), std::end(need_frs1_ops), input.fuOpType) != std::end(need_frs1_ops);
       if (need_frs1) {return rand() % 2 == 0; break;}
+      else {return false; break;}
+    }
+    case VFloatDivider: {
+      if(input.fuOpType == VFDIV) {return rand() % 2 == 0; break;}
+      else {return false; break;}
+    }
+    default: return false; break;
+  }
+}
+
+bool TestDriver::gen_random_is_frs2() {
+  switch(input.fuType){
+    case VFloatDivider: {
+      if(input.fuOpType == VFDIV && (!input.is_frs2)) {return rand() % 2 == 0; break;}
       else {return false; break;}
     }
     default: return false; break;
@@ -249,6 +272,7 @@ void TestDriver::get_random_input() {
   input.widen = gen_random_widen();
   input.src_widen = gen_random_src_widen();
   input.is_frs1 = gen_random_is_frs1();
+  input.is_frs2 = gen_random_is_frs2();
   input.rm = rand() % 5;
   input.rm_s = rand() % 5;
   gen_random_vecinfo();
@@ -318,6 +342,7 @@ bool TestDriver::assign_input_raising(VSimTop *dut_ptr) {
   dut_ptr->io_in_bits_src_widen = input.src_widen;
   dut_ptr->io_in_bits_widen   = input.widen;
   dut_ptr->io_in_bits_is_frs1 = input.is_frs1;
+  dut_ptr->io_in_bits_is_frs2 = input.is_frs2;
   dut_ptr->io_in_bits_rm      = input.rm;
   dut_ptr->io_in_bits_vinfo_vstart = input.vinfo.vstart;
   dut_ptr->io_in_bits_vinfo_vl     = input.vinfo.vl;

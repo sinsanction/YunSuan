@@ -96,7 +96,7 @@ when ((vcompress && uopIdx(1)) ||
 
 when ((vcompress && (uopIdx === 3.U)) || 
       (vslideup && (uopIdx === 1.U)) || 
-      (vslidedn && (uopIdx === 0.U)) 
+      (vslidedn && (uopIdx === 0.U) && vlmul === 1.U) 
       ) {
   base := vlenb.U
 } .otherwise {
@@ -207,8 +207,9 @@ val load_rs1 = (((vlmul >= 4.U) || (vlmul === 0.U)) && (uopIdx === 0.U)) ||
 val vslide1dn_vd = Mux((load_rs1 || uopIdx(0)), VecInit(Seq.tabulate(vlenb)(i => vslide1dn_vd_rs1((i+1)*8-1, i*8))), vslide1dn_vd_wo_rs1)
 
 for (i <-0 until vlenb) { 
-  vslideup_vd(i) := Mux(ma, "hff".U, old_vd(i*8+7, i*8))
-  when (((base + i.U) >= slide_bytes) && ((base + i.U - slide_bytes) < vlenb.U) && (vmask_byte_strb(i) === 1.U)) {
+  val in_bounds_up = ((base + i.U) >= slide_bytes) && ((base + i.U - slide_bytes) < vlenb.U)
+  vslideup_vd(i) := Mux(ma&&in_bounds_up, "hff".U, old_vd(i*8+7, i*8))
+  when (in_bounds_up && (vmask_byte_strb(i) === 1.U)) {
     vslideup_vd(i) := vs2_bytes(base + i.U - slide_bytes) 
   } 
 }
@@ -220,6 +221,8 @@ for (i <-0 until vlenb) {
       vslidedn_vd(i) := vs2_bytes(i.U + slide_bytes - base) 
     } .elsewhen (first_slidedn) {
       vslidedn_vd(i) := 0.U 
+    } .otherwise {
+      vslidedn_vd(i) := old_vd(i*8+7, i*8)
     }
   }
 }
@@ -248,9 +251,9 @@ for (i <-0 until vlenb) {
 
 vslide1dn_vd_rs1 := old_vd
 when (load_rs1 || uopIdx(0)) {
-  when ((vlRemainBytes >= 0.U) && (vlRemainBytes < vlenb.U)) {
+  when ((vlRemainBytes > 0.U) && (vlRemainBytes <= vlenb.U)) {
     vslide1dn_vd_rs1 := (Cat(vslide1dn_vd_wo_rs1.reverse) & (vd_mask >> (VLEN.U - Cat((vlRemainBytes - vsew_bytes), 0.U(3.W))))) | 
-                        (vs1 & (vd_mask >> (VLEN.U - vsew_bits)))
+                        (vs1 & (vd_mask << (VLEN.U - vsew_bits)))
   }
 }
 

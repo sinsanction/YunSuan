@@ -194,25 +194,40 @@ package object yunsuan {
     def viota_m                        = "b01010000".U(OpTypeWidth.W) // viota
     def vid_v                          = "b01010001".U(OpTypeWidth.W) // vid
     // 1
-    def vmv_s_x                        = "b01010010".U(OpTypeWidth.W) // TODO Integer Scalar Move vmv.s.x vd, rs1
+    def vmv_s_x                        = "b01010010".U(OpTypeWidth.W) // vmvsx TODO Integer Scalar Move vmv.s.x vd, rs1
   }
 
   object VfpuType {
     def dummy         = "b11111111".U(OpTypeWidth.W) // exu not implemented
-    def fadd          = "b10000000".U(OpTypeWidth.W) // src1 + src2
-    def fmin          = "b10000001".U(OpTypeWidth.W) // fmin(src1,src2)
-    def fmax          = "b10000010".U(OpTypeWidth.W) // fmax(src1,src2)
-    def feq           = "b10000011".U(OpTypeWidth.W) // feq(src1,src2)
-    def fne           = "b10000100".U(OpTypeWidth.W) // fne(src1,src2)
-    def flt           = "b10000101".U(OpTypeWidth.W) // flt(src1,src2)
-    def fle           = "b10000110".U(OpTypeWidth.W) // fle(src1,src2)
-    def fgt           = "b10000111".U(OpTypeWidth.W) // fgt(src1,src2)
-    def fge           = "b10001000".U(OpTypeWidth.W) // fge(src1,src2)
-    def fsub          = "b10001001".U(OpTypeWidth.W) // src1 - src2
-    def fmacc         = "b00001010".U(OpTypeWidth.W) // vd = +(src1 * src2) + vd
-    def fdiv          = "b00001011".U(OpTypeWidth.W) // vd = src2 / src1
-    
-    def isVfalu(vfpuType: UInt) = vfpuType(7) & !vfpuType(6)
+    def isVfalu  = BitPat("b000?????")
+    def isVfmacc = BitPat("b001?????")
+    def isVfdiv  = BitPat("b010?????")
+    def vfadd    = "b00000000".U(8.W)
+    def vfsub    = "b00000001".U(8.W)
+    def vfmin    = "b00000010".U(8.W)
+    def vfmax    = "b00000011".U(8.W)
+    def vfmerge  = "b00000100".U(8.W)
+    def vfmove   = "b00000101".U(8.W)
+    def vfsgnj   = "b00000110".U(8.W)
+    def vfsgnjn  = "b00000111".U(8.W)
+    def vfsgnjx  = "b00001000".U(8.W)
+    def vfeq     = "b00001001".U(8.W)
+    def vfne     = "b00001010".U(8.W)
+    def vflt     = "b00001011".U(8.W)
+    def vfle     = "b00001100".U(8.W)
+    def vfgt     = "b00001101".U(8.W)
+    def vfge     = "b00001110".U(8.W)
+    def fclass   = "b00001111".U(8.W)
+    def vfmul    = "b00100000".U(8.W)
+    def vfmacc   = "b00100001".U(8.W)
+    def vfnmacc  = "b00100010".U(8.W)
+    def vfmsac   = "b00100011".U(8.W)
+    def vfnmsac  = "b00100100".U(8.W)
+    def vfmadd   = "b00100101".U(8.W)
+    def vfnmadd  = "b00100110".U(8.W)
+    def vfmsub   = "b00100111".U(8.W)
+    def vfnmsub  = "b00101000".U(8.W)
+    def vfdiv    = "b01000000".U(8.W)
   }
 
   object VpermType {
@@ -222,59 +237,24 @@ package object yunsuan {
     def vslideup           = "b00000000".U(OpTypeWidth.W) // 
     def vslidedown         = "b00000001".U(OpTypeWidth.W) // 
     def vslide1up          = "b00000010".U(OpTypeWidth.W) // vd[0]=f[rs1], vd[i+1] = vs2[i]
+    def vfslide1up         = "b01000010".U(OpTypeWidth.W) // 
     def vslide1down        = "b00000011".U(OpTypeWidth.W) // 
+    def vfslide1down       = "b01000011".U(OpTypeWidth.W) // 
     def vrgather           = "b00000100".U(OpTypeWidth.W) // 
     def vrgather_vx        = "b00000101".U(OpTypeWidth.W) // 
     def vcompress          = "b00000110".U(OpTypeWidth.W) // 
     def vmvnr              = "b00000111".U(OpTypeWidth.W) // 
     def vfmv_s_f           = "b00001000".U(OpTypeWidth.W) // 
-    def vfslide1up         = "b00001001".U(OpTypeWidth.W) // 
 
     def getOpcode(fuOpType: UInt) = fuOpType(5,0)
     def getSrcVdType(fuOpType: UInt, sew: UInt) = {
-      val Sew =   Cat(0.U(1.W) ,0.U(1.W),  sew(1,0)       )
-      val format = Cat(Sew, Sew, Sew).asUInt()
+      val sign = fuOpType(6)
+      val sSew =   Cat(sign ,sign,  sew(1,0))
+      val uSew =   Cat(1.U(1.W), 1.U(1.W), sew(1,0))
+      val format = Cat(uSew, sSew, uSew).asUInt()
       format
     }
-
-// vslideup.vx vd, vs2, rs1, vm
-// vslideup.vi vd, vs2, uimm, vm
-// vslidedown.vx vd, vs2, rs1, vm
-// vslidedown.vi vd, vs2, uimm, vm
-// vslide1up.vx vd, vs2, rs1, vm
-// vfslide1up.vf vd, vs2, rs1, vm      // --------
-// vslide1down.vx vd, vs2, rs1, vm
-// vfslide1down.vf vd, vs2, rs1, vm    // --------
-// vrgather.vv vd, vs2, vs1, vm
-// vrgather.vx vd, vs2, rs1, vm
-// vrgather.vi vd, vs2, uimm, vm
-// vrgatherei16.vv vd, vs2, vs1, vm    // --------
-// vcompress.vm vd, vs2, vs1
-// vmv<nr>r.v vd, vs2                  // -------- --------
-
-
-// srcType1 1101 1110 1111
-// vfslide1up.vf   vs1 fp16 fp32 fp64
-// vfslide1down.vf vs1 fp16 fp32 fp64
-// vcompress.vm    vs1 mask
-
-
-// srcType1 0000 0001 0010 0011
-// vslideup.vx vs1 u8 u16 u32 u64
-// vslideup.vi vs1 u8 u16 u32 u64
-// vslidedown.vx
-// vslidedown.vi
-// vslide1up.vx
-// vslide1down.vx
-// vrgather.vv
-// vrgather.vx
-// vrgather.vi
-// vrgatherei16.vv
-
-
-// srcType2 0000 0001 0010 0011
-// vdType   0000 0001 0010 0011
-
+    def isVsilde(fuOpType: UInt) = !fuOpType(7,1).orR
   }
 
   object VfaddOpCode {
@@ -311,6 +291,11 @@ package object yunsuan {
     def vfnmadd = "b0110".U(5.W)
     def vfmsub  = "b0111".U(5.W)
     def vfnmsub = "b1000".U(5.W)
+  }
+
+  object VfdivOpCode {
+    def vfdiv   = "b0".U(1.W)
+    def vfsqrt  = "b1".U(1.W)
   }
 
   object VectorElementFormat {
