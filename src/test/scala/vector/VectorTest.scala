@@ -182,3 +182,18 @@ class VCompressTest extends AnyFlatSpec with ChiselScalatestTester with Matchers
     }
   }
 }
+
+class VPermFsmTopTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with HasTestAnnos {
+
+  behavior of "YunSuan VectorPermFsmTop"
+  it should "pass the syntax" in {
+    test(new VPermFsmTop()).withAnnotations(Seq(
+      VerilatorBackendAnnotation,
+      VerilatorFlags(Seq()),
+      // WriteVcdAnnotation,
+      // TargetDirAnnotation("./build"),
+    )) { dut =>
+      dut.clock.step(10)
+    }
+  }
+}

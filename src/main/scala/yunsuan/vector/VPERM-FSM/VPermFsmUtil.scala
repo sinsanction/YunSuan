@@ -60,6 +60,30 @@ class VPermFsmIO extends VPermBundle {
     val flush = new FsmFlushIO
 }
 
+class Vecinfo extends VPermBundle {
+    val sew = UInt(2.W)
+    val lmul = UInt(4.W)
+    val elem_num_pow = UInt(3.W)
+
+    val vstart = UInt(7.W)
+    val vl = UInt(8.W)
+    val vm = Bool()
+    val ta = Bool()
+    val ma = Bool()
+
+    val lmul_4 = Bool()
+    val opcode = UInt(3.W)
+}
+
+class Uopinfo extends VPermBundle {
+    val vs1_preg_idx = UInt(8.W)
+    val vs2_preg_idx = UInt(8.W)
+    val old_vd_preg_idx = UInt(8.W)
+    val vd_preg_idx = UInt(8.W)
+
+    val rob_idx = UInt(9.W)
+}
+
 object VPermFsmType {
     def VPermFsmTypeWidth: Int = 3
 
