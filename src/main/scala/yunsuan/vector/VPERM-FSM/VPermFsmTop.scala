@@ -20,12 +20,14 @@ class VPermFsmTop extends VPermModule {
     val viq_valid = viq0_valid || viq1_valid
 
     // fsm state
-    val idle :: recv_preg :: working :: end :: Nil = Enum(4)
+    val idle :: recv_preg :: working :: ending :: Nil = Enum(4)
     val state = RegInit(idle)
     val state_next = WireInit(state)
     val uop_recv = RegInit(VecInit(Seq.fill(8)(false.B)))
     val uop_recv_next = WireInit(uop_recv)
     val is_lmul_4 = Wire(Bool())
+    val working_done = Wire(Bool())
+    val ending_done = Wire(Bool())
     state := state_next
     uop_recv := uop_recv_next
 
@@ -38,6 +40,16 @@ class VPermFsmTop extends VPermModule {
         is( recv_preg ) {
             when( (uop_recv_next.asUInt === "b11111111".U(8.W) && !is_lmul_4) || (uop_recv_next.asUInt === "b00001111".U(8.W) && is_lmul_4) ) {
                 state_next := working
+            }
+        }
+        is( working ) {
+            when( working_done ) {
+                state_next := ending
+            }
+        }
+        is( ending ) {
+            when( ending_done ) {
+                state_next := idle
             }
         }
     }
@@ -131,22 +143,44 @@ class VPermFsmTop extends VPermModule {
         for(i <- 0 until 8) { exceed_limit(i) := Mux(opcode_first_uop === VPermFsmType.vslideup, sldup_exceed_limit(i), slddw_exceed_limit(i)) }
     }
 
+    // gather reg
+    val idx_rs1 = Reg(UInt(XLEN.W))
+    val access_table = Reg(Vec(8, UInt(8.W)))
 
-    io.vfr.fsm_wb_preg_idx := 0.U
-    io.vfr.fsm_wb_vld := false.B
+    when((state === idle || state === recv_preg) && is_first_uop) {
+        idx_rs1 := rs1
+    }
 
-    io.vfr.fsm_rd_vld := DontCare
-    io.vfr.fsm_rd_preg_idx := DontCare
+    val lmul_0 = Mux(io.viq(0).lmul_4, 4.U, 8.U)
+    val lmul_1 = Mux(io.viq(1).lmul_4, 4.U, 8.U)
 
-    io.flush.fsm_busy := DontCare
-    io.flush.fsm_rob_idx := 0.U
-    io.flush.fsm_lmul_4 := true.B
+    val access_table_viq_0 = Module(new AccessTableModule)
+    val access_table_viq_1 = Module(new AccessTableModule)
+    access_table_viq_0.io.sew          := io.viq(0).sew
+    access_table_viq_0.io.elem_num_pow := elem_num_pow_0
+    access_table_viq_0.io.lmul         := lmul_0
+    access_table_viq_0.io.opcode       := io.viq(0).opcode
+    access_table_viq_0.io.vs1_data     := io.viq(0).vs1
+    access_table_viq_1.io.sew          := io.viq(1).sew
+    access_table_viq_1.io.elem_num_pow := elem_num_pow_1
+    access_table_viq_1.io.lmul         := lmul_1
+    access_table_viq_1.io.opcode       := io.viq(1).opcode
+    access_table_viq_1.io.vs1_data     := io.viq(1).vs1
+
+    when((state === idle || state === recv_preg) && viq0_valid) {
+        access_table(io.viq(0).uop_idx) := access_table_viq_0.io.res_data
+    }
+    when((state === idle || state === recv_preg) && viq1_valid) {
+        access_table(io.viq(1).uop_idx) := access_table_viq_1.io.res_data
+    }
+
+    //assert(((state === idle || state === recv_preg) && viq0_valid && io.viq(0).lmul_4 && (access_table_viq_0.io.res_data > 15.U)), "access table 0 has valid bit over 4 when lmul is 4")
+    //assert(((state === idle || state === recv_preg) && viq1_valid && io.viq(1).lmul_4 && (access_table_viq_1.io.res_data > 15.U)), "access table 1 has valid bit over 4 when lmul is 4")
 
     // --------------------------------
-    // stage 02 working
+    // stage 02 read_vrf
     // --------------------------------
     // common
-    val uop_idx = RegInit(0.U(3.W))
     val sew = vecinfo.sew
     val lmul = vecinfo.lmul
     val elem_num_pow = vecinfo.elem_num_pow
@@ -157,13 +191,19 @@ class VPermFsmTop extends VPermModule {
     val ma = vecinfo.ma
     val lmul_4 = vecinfo.lmul_4
     val opcode = vecinfo.opcode
-    val mask_start_idx = uop_idx << elem_num_pow
+
+    val execinfo = Wire(new Execinfo)
+    val uop_idx_vrf = Reg(UInt(3.W))
+    val uop_idx_update = Wire(Bool())
+    val vrf_request_succ = Wire(Bool())
 
     when(state === recv_preg && state_next === working) {
-        uop_idx := 0.U
-    }.elsewhen(state === working) {
-        uop_idx := uop_idx + 1.U
+        uop_idx_vrf := 0.U
+    }.elsewhen(state === working && uop_idx_update) {
+        uop_idx_vrf := uop_idx_vrf + 1.U
     }
+
+    working_done := Mux(lmul_4, (uop_idx_vrf === 3.U), (uop_idx_vrf === 7.U)) && uop_idx_update
 
     // slide
     val sldup_src_idx_lo = Wire(Vec(8, UInt(3.W)))
@@ -198,6 +238,133 @@ class VPermFsmTop extends VPermModule {
     slddw_exceed_limit_hi(7) := true.B
     for(i <- 0 until 7) { slddw_exceed_limit_hi(i) := slddw_exceed_limit_lo(i+1) }
 
+    // gather
+    val first_op = RegInit(false.B)
+    when(state === recv_preg && state_next === working) {
+        first_op := true.B
+    }.elsewhen(state === working) {
+        when(vrf_request_succ && !uop_idx_update) {
+            first_op := false.B
+        }.elsewhen(uop_idx_update) {
+            first_op := true.B
+        }
+    }.otherwise {
+        first_op := false.B
+    }
+
+    val current_access_lo = SetOnlyFirst(access_table(uop_idx_vrf))
+    val current_access_hi = SetOnlyFirst(~current_access_lo & access_table(uop_idx_vrf))
+    assert(PopCount(current_access_lo) <= 1.U, "current_access_lo is not one-hot")
+    assert(PopCount(current_access_hi) <= 1.U, "current_access_hi is not one-hot")
+    val access_table_next = ~(current_access_lo | current_access_hi) & access_table(uop_idx_vrf)
+    when(state === working && vrf_request_succ) {
+        access_table(uop_idx_vrf) := access_table_next
+    }
+
+    val current_is_last = PopCount(access_table(uop_idx_vrf)) <= 2.U
+    val current_table_valid_hi = PopCount(access_table(uop_idx_vrf)) >= 2.U
+    val current_table_valid_lo = PopCount(access_table(uop_idx_vrf)) >= 1.U
+
+    val current_table_idx_hi = (0 until 8).map{ i => Fill(3, current_access_hi(i)) & i.U(3.W) }.reduce(_ | _)
+    val current_table_idx_lo = (0 until 8).map{ i => Fill(3, current_access_lo(i)) & i.U(3.W) }.reduce(_ | _)
+    val current_table_preg_idx_hi = (0 until 8).map{ i => Fill(8, current_access_hi(i)) & uopinfo(i).vs2_preg_idx }.reduce(_ | _)
+    val current_table_preg_idx_lo = (0 until 8).map{ i => Fill(8, current_access_lo(i)) & uopinfo(i).vs2_preg_idx }.reduce(_ | _)
+
+    // to vrf
+    val rd_preg_idx = Wire(Vec(4, UInt(8.W)))
+    val rd_vld = Wire(Vec(4, Bool()))
+    val wb_vld = Wire(Bool())
+    vrf_request_succ := !io.vrf.block_fsm_rd_vld
+
+    rd_preg_idx := DontCare
+    rd_vld := DontCare
+    wb_vld := false.B
+    execinfo := DontCare
+    uop_idx_update := false.B
+
+    when(opcode === VPermFsmType.vslideup) {
+        rd_preg_idx(0) := DontCare
+        rd_preg_idx(1) := uopinfo(sldup_src_idx_lo(uop_idx_vrf)).vs2_preg_idx
+        rd_preg_idx(2) := uopinfo(sldup_src_idx_hi(uop_idx_vrf)).vs2_preg_idx
+        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
+        rd_vld(0) := false.B
+        rd_vld(1) := !sldup_exceed_limit_lo(uop_idx_vrf)
+        rd_vld(2) := !sldup_exceed_limit_hi(uop_idx_vrf)
+        rd_vld(3) := true.B
+        wb_vld := true.B
+        execinfo.write_vrf := true.B
+        execinfo.write_temp := false.B
+        uop_idx_update := vrf_request_succ
+    }.elsewhen(opcode === VPermFsmType.vslidedown) {
+        rd_preg_idx(0) := DontCare
+        rd_preg_idx(1) := uopinfo(slddw_src_idx_lo(uop_idx_vrf)).vs2_preg_idx
+        rd_preg_idx(2) := uopinfo(slddw_src_idx_hi(uop_idx_vrf)).vs2_preg_idx
+        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
+        rd_vld(0) := false.B
+        rd_vld(1) := !slddw_exceed_limit_lo(uop_idx_vrf)
+        rd_vld(2) := !slddw_exceed_limit_hi(uop_idx_vrf)
+        rd_vld(3) := true.B
+        wb_vld := true.B
+        execinfo.write_vrf := true.B
+        execinfo.write_temp := false.B
+        uop_idx_update := vrf_request_succ
+    }.elsewhen(opcode === VPermFsmType.vrgathervv || opcode === VPermFsmType.vrgathervxvi) {
+        rd_preg_idx(0) := uopinfo(uop_idx_vrf).vs1_preg_idx
+        rd_preg_idx(1) := current_table_preg_idx_lo
+        rd_preg_idx(2) := current_table_preg_idx_hi
+        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
+        rd_vld(0) := opcode === VPermFsmType.vrgathervv
+        rd_vld(1) := current_table_valid_lo
+        rd_vld(2) := current_table_valid_hi
+        rd_vld(3) := first_op
+        wb_vld := current_is_last
+        execinfo.write_vrf := current_is_last
+        execinfo.write_temp := !current_is_last
+        execinfo.first_op := first_op
+        execinfo.table_valid_hi := current_table_valid_hi
+        execinfo.table_idx_hi := current_table_idx_hi
+        execinfo.table_idx_lo := current_table_idx_lo
+        uop_idx_update := current_is_last && vrf_request_succ
+    }
+
+    execinfo.valid := vrf_request_succ
+    execinfo.uop_idx := uop_idx_vrf
+
+    io.vrf.fsm_wb_vld := wb_vld && vrf_request_succ
+    io.vrf.fsm_rd_vld(0) := rd_vld(0) && vrf_request_succ
+    io.vrf.fsm_rd_vld(1) := rd_vld(1) && vrf_request_succ
+    io.vrf.fsm_rd_vld(2) := rd_vld(2) && vrf_request_succ
+    io.vrf.fsm_rd_vld(3) := rd_vld(3) && vrf_request_succ
+
+    io.vrf.fsm_wb_preg_idx := uopinfo(uop_idx_vrf).vd_preg_idx
+    io.vrf.fsm_rd_preg_idx(0) := rd_preg_idx(0)
+    io.vrf.fsm_rd_preg_idx(1) := rd_preg_idx(1)
+    io.vrf.fsm_rd_preg_idx(2) := rd_preg_idx(2)
+    io.vrf.fsm_rd_preg_idx(3) := rd_preg_idx(3)
+
+    io.flush.fsm_busy := (state =/= idle)
+    io.flush.fsm_rob_idx := uopinfo(0).rob_idx
+    io.flush.fsm_lmul_4 := vecinfo.lmul_4
+
+    // --------------------------------
+    // stage 03 exec
+    // --------------------------------
+    // common
+    val execinfo_reg = DelayN(execinfo, 4)
+    val uop_idx = execinfo_reg.uop_idx
+    val exec_valid = execinfo_reg.valid
+    val write_vrf = execinfo_reg.write_vrf
+    val write_temp = execinfo_reg.write_temp
+    val mask_start_idx = uop_idx << elem_num_pow
+
+    // gather
+    val gather_first_op = execinfo_reg.first_op
+    val table_valid_hi = execinfo_reg.table_valid_hi
+    val min_hi = execinfo_reg.table_idx_hi << elem_num_pow
+    val max_hi = (execinfo_reg.table_idx_hi +& 1.U) << elem_num_pow
+    val min_lo = execinfo_reg.table_idx_lo << elem_num_pow
+    val max_lo = (execinfo_reg.table_idx_lo +& 1.U) << elem_num_pow
+
     // slide up
     val vslideup_fsm = Module(new SlideUpFsmModule)
     val vslideup_in = Wire(new SlideFsmIO)
@@ -214,9 +381,9 @@ class VPermFsmTop extends VPermModule {
     vslideup_in.mask := (v0_mask >> mask_start_idx)(15, 0)
     vslideup_in.exceed_limit_hi := sldup_exceed_limit_hi(uop_idx)
     vslideup_in.exceed_limit_lo := sldup_exceed_limit_lo(uop_idx)
-    vslideup_in.src_data_hi := io.vfr.fsm_rd_data(2)
-    vslideup_in.src_data_lo := io.vfr.fsm_rd_data(1)
-    vslideup_in.prev_data := io.vfr.fsm_rd_data(3)
+    vslideup_in.src_data_hi := io.vrf.fsm_rd_data(2)
+    vslideup_in.src_data_lo := io.vrf.fsm_rd_data(1)
+    vslideup_in.prev_data := io.vrf.fsm_rd_data(3)
 
     vslideup_fsm.io.slidefsm := vslideup_in
 
@@ -236,11 +403,61 @@ class VPermFsmTop extends VPermModule {
     vslidedown_in.mask := (v0_mask >> mask_start_idx)(15, 0)
     vslidedown_in.exceed_limit_hi := slddw_exceed_limit_hi(uop_idx)
     vslidedown_in.exceed_limit_lo := slddw_exceed_limit_lo(uop_idx)
-    vslidedown_in.src_data_hi := io.vfr.fsm_rd_data(2)
-    vslidedown_in.src_data_lo := io.vfr.fsm_rd_data(1)
-    vslidedown_in.prev_data := io.vfr.fsm_rd_data(3)
+    vslidedown_in.src_data_hi := io.vrf.fsm_rd_data(2)
+    vslidedown_in.src_data_lo := io.vrf.fsm_rd_data(1)
+    vslidedown_in.prev_data := io.vrf.fsm_rd_data(3)
 
     vslidedown_fsm.io.slidefsm := vslidedown_in
 
-    io.vfr.fsm_wb_data := vslideup_fsm.io.res_data
+    // gather
+    val vrgather_temp = Reg(UInt(VLEN.W))
+    val vrgather_fsm = Module(new GatherFsmModule)
+    val vrgather_in = Wire(new GatherFsmIO)
+
+    vrgather_in.mask_start_idx := mask_start_idx
+    vrgather_in.sew := sew
+    vrgather_in.vstart := vstart
+    vrgather_in.vl := vl
+    vrgather_in.vm := vm
+    vrgather_in.ta := ta
+    vrgather_in.ma := ma
+
+    vrgather_in.mask := (v0_mask >> mask_start_idx)(15, 0)
+    vrgather_in.table_valid_hi := table_valid_hi
+    vrgather_in.first_op := gather_first_op
+    vrgather_in.min_hi := min_hi
+    vrgather_in.max_hi := max_hi
+    vrgather_in.min_lo := min_lo
+    vrgather_in.max_lo := max_lo
+    vrgather_in.idx_rs1 := idx_rs1
+    vrgather_in.idx_is_rs1 := (opcode === VPermFsmType.vrgathervxvi)
+
+    vrgather_in.idx_data := io.vrf.fsm_rd_data(0)
+    vrgather_in.table_data_hi := io.vrf.fsm_rd_data(2)
+    vrgather_in.table_data_lo := io.vrf.fsm_rd_data(1)
+    vrgather_in.prev_data := Mux(gather_first_op, io.vrf.fsm_rd_data(3), vrgather_temp)
+
+    vrgather_fsm.io.gather := vrgather_in
+
+    // write vrf
+    val execinfo_reg_w = RegNext(execinfo_reg)
+    val wb_data = Reg(UInt(VLEN.W))
+
+    ending_done := Mux(lmul_4, (execinfo_reg_w.uop_idx === 3.U), (execinfo_reg_w.uop_idx === 7.U)) && execinfo_reg_w.valid && execinfo_reg_w.write_vrf
+
+    when((state === working || state === ending) && execinfo_reg_w.valid && execinfo_reg_w.write_temp) {
+        vrgather_temp := vrgather_fsm.io.res_data
+    }
+
+    val res_data = LookupTreeDefault(opcode, 0.U(VLEN.W), List(
+        VPermFsmType.vslideup     -> vslideup_fsm.io.res_data,
+        VPermFsmType.vslidedown   -> vslidedown_fsm.io.res_data,
+        VPermFsmType.vrgathervv   -> vrgather_fsm.io.res_data,
+        VPermFsmType.vrgathervxvi -> vrgather_fsm.io.res_data,
+        //VPermFsmType.vcompress    -> vcompress_fsm.io.res_data,
+    ))
+    when((state === working || state === ending) && execinfo_reg_w.valid && execinfo_reg_w.write_vrf) {
+        wb_data := res_data
+    }
+    io.vrf.fsm_wb_data := wb_data
 }
