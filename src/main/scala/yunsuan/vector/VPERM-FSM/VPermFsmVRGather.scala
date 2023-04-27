@@ -33,6 +33,7 @@ class GatherFsmIO extends VPermBundle {
     val table_data_hi   = UInt(VLEN.W)
     val table_data_lo   = UInt(VLEN.W)
     val prev_data       = UInt(VLEN.W)
+    val temp_data       = UInt(VLEN.W)
 }
 
 // table_lookup_fsm

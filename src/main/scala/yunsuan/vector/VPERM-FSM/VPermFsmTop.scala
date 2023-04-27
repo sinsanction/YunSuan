@@ -54,6 +54,10 @@ class VPermFsmTop extends VPermModule {
         }
     }
 
+    when(state === working) {
+        uop_recv_next.foreach{ next => next := false.B }
+    }
+
 
     // global reg
     val vecinfo = Reg(new Vecinfo)
@@ -276,18 +280,19 @@ class VPermFsmTop extends VPermModule {
     val wb_vld = Wire(Bool())
     vrf_request_succ := !io.vrf.block_fsm_rd_vld
 
-    rd_preg_idx := DontCare
-    rd_vld := DontCare
+    rd_preg_idx := 0.U.asTypeOf(Vec(4, UInt(8.W)))
+    rd_vld := 0.U.asTypeOf(Vec(4, Bool()))
     wb_vld := false.B
-    execinfo := DontCare
+    execinfo := 0.U.asTypeOf(new Execinfo)
     uop_idx_update := false.B
 
+    rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
+    execinfo.valid := vrf_request_succ && (state === working)
+    execinfo.uop_idx := uop_idx_vrf
+
     when(opcode === VPermFsmType.vslideup) {
-        rd_preg_idx(0) := DontCare
         rd_preg_idx(1) := uopinfo(sldup_src_idx_lo(uop_idx_vrf)).vs2_preg_idx
         rd_preg_idx(2) := uopinfo(sldup_src_idx_hi(uop_idx_vrf)).vs2_preg_idx
-        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
-        rd_vld(0) := false.B
         rd_vld(1) := !sldup_exceed_limit_lo(uop_idx_vrf)
         rd_vld(2) := !sldup_exceed_limit_hi(uop_idx_vrf)
         rd_vld(3) := true.B
@@ -296,11 +301,8 @@ class VPermFsmTop extends VPermModule {
         execinfo.write_temp := false.B
         uop_idx_update := vrf_request_succ
     }.elsewhen(opcode === VPermFsmType.vslidedown) {
-        rd_preg_idx(0) := DontCare
         rd_preg_idx(1) := uopinfo(slddw_src_idx_lo(uop_idx_vrf)).vs2_preg_idx
         rd_preg_idx(2) := uopinfo(slddw_src_idx_hi(uop_idx_vrf)).vs2_preg_idx
-        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
-        rd_vld(0) := false.B
         rd_vld(1) := !slddw_exceed_limit_lo(uop_idx_vrf)
         rd_vld(2) := !slddw_exceed_limit_hi(uop_idx_vrf)
         rd_vld(3) := true.B
@@ -312,7 +314,6 @@ class VPermFsmTop extends VPermModule {
         rd_preg_idx(0) := uopinfo(uop_idx_vrf).vs1_preg_idx
         rd_preg_idx(1) := current_table_preg_idx_lo
         rd_preg_idx(2) := current_table_preg_idx_hi
-        rd_preg_idx(3) := uopinfo(uop_idx_vrf).old_vd_preg_idx
         rd_vld(0) := opcode === VPermFsmType.vrgathervv
         rd_vld(1) := current_table_valid_lo
         rd_vld(2) := current_table_valid_hi
@@ -327,14 +328,11 @@ class VPermFsmTop extends VPermModule {
         uop_idx_update := current_is_last && vrf_request_succ
     }
 
-    execinfo.valid := vrf_request_succ
-    execinfo.uop_idx := uop_idx_vrf
-
-    io.vrf.fsm_wb_vld := wb_vld && vrf_request_succ
-    io.vrf.fsm_rd_vld(0) := rd_vld(0) && vrf_request_succ
-    io.vrf.fsm_rd_vld(1) := rd_vld(1) && vrf_request_succ
-    io.vrf.fsm_rd_vld(2) := rd_vld(2) && vrf_request_succ
-    io.vrf.fsm_rd_vld(3) := rd_vld(3) && vrf_request_succ
+    io.vrf.fsm_wb_vld := wb_vld && vrf_request_succ && (state === working)
+    io.vrf.fsm_rd_vld(0) := rd_vld(0) && vrf_request_succ && (state === working)
+    io.vrf.fsm_rd_vld(1) := rd_vld(1) && vrf_request_succ && (state === working)
+    io.vrf.fsm_rd_vld(2) := rd_vld(2) && vrf_request_succ && (state === working)
+    io.vrf.fsm_rd_vld(3) := rd_vld(3) && vrf_request_succ && (state === working)
 
     io.vrf.fsm_wb_preg_idx := uopinfo(uop_idx_vrf).vd_preg_idx
     io.vrf.fsm_rd_preg_idx(0) := rd_preg_idx(0)
@@ -435,7 +433,8 @@ class VPermFsmTop extends VPermModule {
     vrgather_in.idx_data := io.vrf.fsm_rd_data(0)
     vrgather_in.table_data_hi := io.vrf.fsm_rd_data(2)
     vrgather_in.table_data_lo := io.vrf.fsm_rd_data(1)
-    vrgather_in.prev_data := Mux(gather_first_op, io.vrf.fsm_rd_data(3), vrgather_temp)
+    vrgather_in.prev_data := io.vrf.fsm_rd_data(3)
+    vrgather_in.temp_data := vrgather_temp
 
     vrgather_fsm.io.gather := vrgather_in
 
