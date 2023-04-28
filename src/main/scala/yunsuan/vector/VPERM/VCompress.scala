@@ -36,8 +36,9 @@ class Compress(n: Int) extends VPermModule {
 
         val elements_idx = io.os_base + i.U
         val res_agnostic = ((elements_idx >= io.vl) || (i.U >= io.elem_vld)) && io.ta
+        val inst_invalid = io.vl === 0.U
 
-        temp_data_vec(i) := RegNext(Mux(res_agnostic, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i)))
+        temp_data_vec(i) := RegNext(Mux(inst_invalid, prev_data_vec(i), Mux(res_agnostic, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i))))
     }
 
     val cmos_vec = Wire(Vec(n+1, UInt(8.W)))
@@ -159,20 +160,20 @@ class CompressModule extends VPermModule {
         compress_module(i).prev_data := io.old_vd
     }
 
-    val compress_res_data = LookupTree(vformat, List(
+    val compress_res_data = LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> compress_module_0.io.res_data,
         VectorElementFormat.h -> compress_module_1.io.res_data,
         VectorElementFormat.w -> compress_module_2.io.res_data,
         VectorElementFormat.d -> compress_module_3.io.res_data
     ))
-    val ones_sum_res_data = LookupTree(vformat, List(
+    val ones_sum_res_data = LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> compress_module_0.io.cmos_last,
         VectorElementFormat.h -> compress_module_1.io.cmos_last,
         VectorElementFormat.w -> compress_module_2.io.cmos_last,
         VectorElementFormat.d -> compress_module_3.io.cmos_last
     ))
 
-    val output_mask_ones_sum = (io.uop_idx === 1.U) || (io.uop_idx === 4.U) || (io.uop_idx === 8.U) || (io.uop_idx === 13.U) || (io.uop_idx === 19.U) || (io.uop_idx === 26.U) || (io.uop_idx === 34.U)
+    val output_mask_ones_sum = RegNext((io.uop_idx === 1.U) || (io.uop_idx === 4.U) || (io.uop_idx === 8.U) || (io.uop_idx === 13.U) || (io.uop_idx === 19.U) || (io.uop_idx === 26.U) || (io.uop_idx === 34.U))
 
-    io.res_vd := Mux(io.vstart >= io.vl, io.old_vd, Mux(output_mask_ones_sum, ZeroExt(ones_sum_res_data, VLEN), compress_res_data))
+    io.res_vd := Mux(output_mask_ones_sum, ZeroExt(ones_sum_res_data, VLEN), compress_res_data)
 }
