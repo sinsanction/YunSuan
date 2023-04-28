@@ -49,6 +49,7 @@ class SlideUpLookup(n: Int) extends VPermModule {
 
     val ta_reg = RegNext(io.ta)
     val elem_vld_reg = RegNext(io.elem_vld)
+    val inst_invalid = RegNext(io.vstart >= io.vl)
 
     // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
@@ -66,6 +67,9 @@ class SlideUpLookup(n: Int) extends VPermModule {
             }
         }.otherwise {
             res_data_vec(i) := Mux(ta_reg, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i))
+        }
+        when (inst_invalid) {
+            res_data_vec(i) := prev_data_vec(i)
         }
     }
 
@@ -148,12 +152,12 @@ class SlideUpLookupModule extends VPermModule {
         slide_up_module(i).prev_data      := io.old_vd
     }
 
-    io.res_vd := Mux(io.vstart >= io.vl, io.old_vd, LookupTree(vformat, List(
+    io.res_vd := LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> slide_up_module_0.io.res_data,
         VectorElementFormat.h -> slide_up_module_1.io.res_data,
         VectorElementFormat.w -> slide_up_module_2.io.res_data,
         VectorElementFormat.d -> slide_up_module_3.io.res_data
-    )))
+    ))
 }
 
 // vslide1up.vx
@@ -200,6 +204,7 @@ class Slide1Up(n: Int) extends VPermModule {
 
     val ta_reg = RegNext(io.ta)
     val elem_vld_reg = RegNext(io.elem_vld)
+    val inst_invalid = RegNext(io.vstart >= io.vl)
 
     // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
@@ -217,6 +222,9 @@ class Slide1Up(n: Int) extends VPermModule {
             }
         }.otherwise {
             res_data_vec(i) := Mux(ta_reg, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i))
+        }
+        when (inst_invalid) {
+            res_data_vec(i) := prev_data_vec(i)
         }
     }
 
@@ -262,12 +270,12 @@ class Slide1UpModule extends VPermModule {
         slide_1_up_module(i).prev_data      := io.old_vd
     }
 
-    io.res_vd := Mux(io.vstart >= io.vl, io.old_vd, LookupTree(vformat, List(
+    io.res_vd := LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> slide_1_up_module_0.io.res_data,
         VectorElementFormat.h -> slide_1_up_module_1.io.res_data,
         VectorElementFormat.w -> slide_1_up_module_2.io.res_data,
         VectorElementFormat.d -> slide_1_up_module_3.io.res_data
-    )))
+    ))
 }
 
 // vslidedown.vx/vi
@@ -314,6 +322,7 @@ class SlideDownLookup(n: Int) extends VPermModule {
     val ta_reg = RegNext(io.ta)
     val elem_vld_reg = RegNext(io.elem_vld)
     val first_slide_reg = RegNext(io.first_slidedown)
+    val inst_invalid = RegNext(io.vstart >= io.vl)
 
     // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
@@ -333,6 +342,9 @@ class SlideDownLookup(n: Int) extends VPermModule {
             }
         }.otherwise {
             res_data_vec(i) := Mux(ta_reg, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i))
+        }
+        when (inst_invalid) {
+            res_data_vec(i) := prev_data_vec(i)
         }
     }
 
@@ -455,12 +467,12 @@ class SlideDownLookupModule extends VPermModule {
         slide_down_module(i).prev_data       := io.old_vd
     }
 
-    io.res_vd := Mux(io.vstart >= io.vl, io.old_vd, LookupTree(vformat, List(
+    io.res_vd := LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> slide_down_module_0.io.res_data,
         VectorElementFormat.h -> slide_down_module_1.io.res_data,
         VectorElementFormat.w -> slide_down_module_2.io.res_data,
         VectorElementFormat.d -> slide_down_module_3.io.res_data
-    )))
+    ))
 }
 
 // vslide1down.vx
@@ -514,6 +526,7 @@ class Slide1Down(n: Int) extends VPermModule {
     val ta_reg = RegNext(io.ta)
     val elem_vld_reg = RegNext(io.elem_vld)
     val slide1down_from_vs1_reg = RegNext(io.slide1down_from_vs1)
+    val inst_invalid = RegNext(io.vstart >= io.vl)
 
     // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
@@ -535,6 +548,9 @@ class Slide1Down(n: Int) extends VPermModule {
             }
         }.otherwise {
             res_data_vec(i) := Mux(ta_reg, Fill(VLEN/n, 1.U(1.W)), prev_data_vec(i))
+        }
+        when (inst_invalid) {
+            res_data_vec(i) := prev_data_vec(i)
         }
     }
 
@@ -596,10 +612,10 @@ class Slide1DownModule extends VPermModule {
         slide_1_down_module(i).prev_data               := io.old_vd
     }
 
-    io.res_vd := Mux(io.vstart >= io.vl, io.old_vd, LookupTree(vformat, List(
+    io.res_vd := LookupTree(RegNext(vformat), List(
         VectorElementFormat.b -> slide_1_down_module_0.io.res_data,
         VectorElementFormat.h -> slide_1_down_module_1.io.res_data,
         VectorElementFormat.w -> slide_1_down_module_2.io.res_data,
         VectorElementFormat.d -> slide_1_down_module_3.io.res_data
-    )))
+    ))
 }
