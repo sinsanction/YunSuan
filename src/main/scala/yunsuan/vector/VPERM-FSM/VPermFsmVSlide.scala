@@ -34,33 +34,46 @@ class SlideUpLookupFsm(n: Int) extends VPermModule {
         val res_data  = Output(UInt(VLEN.W))
     })
 
+    // stage-0
+    val index = Wire(Vec(n, UInt(log2Up(n).W)))
+    val res_keep_old_vd = Wire(Vec(n, Bool()))
+    val res_agnostic = Wire(Vec(n, Bool()))
+    val res_update_hi = Wire(Vec(n, Bool()))
+    val res_update_lo = Wire(Vec(n, Bool()))
     val src_data_hi_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val src_data_lo_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val prev_data_vec = Wire(Vec(n, UInt((VLEN/n).W)))
+
+    for(i <- 0 until n) {
+        val elements_idx = io.slidefsm.mask_start_idx + i.U
+
+        index(i) := RegNext(i.U + ~io.slidefsm.slide + 1.U)
+        res_keep_old_vd(i) := RegNext((!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && !io.slidefsm.ma) || (elements_idx < io.slidefsm.vstart) || ((elements_idx >= io.slidefsm.vl) && !io.slidefsm.ta) || (io.slidefsm.vstart >= io.slidefsm.vl))
+        res_agnostic(i) := RegNext(((elements_idx >= io.slidefsm.vl) && io.slidefsm.ta) || (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && io.slidefsm.ma))
+        res_update_hi(i) := RegNext(io.slidefsm.slide <= i.U)
+        res_update_lo(i) := RegNext((i.U < io.slidefsm.slide) && !io.slidefsm.exceed_limit_lo)
+
+        src_data_hi_vec(i) := RegNext(io.slidefsm.src_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        src_data_lo_vec(i) := RegNext(io.slidefsm.src_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        prev_data_vec(i)   := RegNext(io.slidefsm.prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+    }
+
+    val exceed_limit_hi = RegNext(io.slidefsm.exceed_limit_hi)
+
+    // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
 
     for(i <- 0 until n) {
-        src_data_hi_vec(i) := io.slidefsm.src_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        src_data_lo_vec(i) := io.slidefsm.src_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        prev_data_vec(i)   := io.slidefsm.prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-    }
-
-    for(i <- 0 until n) {
-        val index = i.U + ~io.slidefsm.slide + 1.U
-        val elements_idx = io.slidefsm.mask_start_idx + i.U
-        val res_keep_old_vd = (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && !io.slidefsm.ma) || (elements_idx < io.slidefsm.vstart) || ((elements_idx >= io.slidefsm.vl) && !io.slidefsm.ta)
-        val res_agnostic = ((elements_idx >= io.slidefsm.vl) && io.slidefsm.ta) || (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && io.slidefsm.ma)
-
-        when( res_keep_old_vd ) {
+        when( res_keep_old_vd(i) ) {
             res_data_vec(i) := prev_data_vec(i)
-        }.elsewhen( res_agnostic ) {
+        }.elsewhen( res_agnostic(i) ) {
             res_data_vec(i) := Fill(VLEN/n, 1.U(1.W))
-        }.elsewhen( io.slidefsm.exceed_limit_hi ) {
+        }.elsewhen( exceed_limit_hi ) {
             res_data_vec(i) := prev_data_vec(i)
-        }.elsewhen( io.slidefsm.slide <= i.U ) {
-            res_data_vec(i) := src_data_hi_vec(index)
-        }.elsewhen( (i.U < io.slidefsm.slide) && !io.slidefsm.exceed_limit_lo ) {
-            res_data_vec(i) := src_data_lo_vec(index)
+        }.elsewhen( res_update_hi(i) ) {
+            res_data_vec(i) := src_data_hi_vec(index(i))
+        }.elsewhen( res_update_lo(i) ) {
+            res_data_vec(i) := src_data_lo_vec(index(i))
         }.otherwise {
             res_data_vec(i) := prev_data_vec(i)
         }
@@ -85,12 +98,12 @@ class SlideUpFsmModule extends VPermModule {
         slideup_fsm_module(i).slidefsm := io.slidefsm
     }
 
-    io.res_data := Mux(io.slidefsm.vstart >= io.slidefsm.vl, io.slidefsm.prev_data, LookupTree(io.slidefsm.sew, List(
+    io.res_data := LookupTree(io.slidefsm.sew, List(
         VectorElementFormat.b -> slideup_fsm_module_0.io.res_data,
         VectorElementFormat.h -> slideup_fsm_module_1.io.res_data,
         VectorElementFormat.w -> slideup_fsm_module_2.io.res_data,
         VectorElementFormat.d -> slideup_fsm_module_3.io.res_data
-    )))
+    ))
 }
 
 // slidedown_lookup_fsm
@@ -100,33 +113,46 @@ class SlideDownLookupFsm(n: Int) extends VPermModule {
         val res_data  = Output(UInt(VLEN.W))
     })
 
+    // stage-0
+    val index = Wire(Vec(n, UInt(log2Up(n).W)))
+    val res_keep_old_vd = Wire(Vec(n, Bool()))
+    val res_agnostic = Wire(Vec(n, Bool()))
+    val res_update_hi = Wire(Vec(n, Bool()))
+    val res_update_lo = Wire(Vec(n, Bool()))
     val src_data_hi_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val src_data_lo_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val prev_data_vec = Wire(Vec(n, UInt((VLEN/n).W)))
+
+    for(i <- 0 until n) {
+        val elements_idx = io.slidefsm.mask_start_idx + i.U
+
+        index(i) := RegNext(i.U + io.slidefsm.slide)
+        res_keep_old_vd(i) := RegNext((!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && !io.slidefsm.ma) || (elements_idx < io.slidefsm.vstart) || ((elements_idx >= io.slidefsm.vl) && !io.slidefsm.ta) || (io.slidefsm.vstart >= io.slidefsm.vl))
+        res_agnostic(i) := RegNext(((elements_idx >= io.slidefsm.vl) && io.slidefsm.ta) || (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && io.slidefsm.ma))
+        res_update_hi(i) := RegNext((n.U <= (i.U +& io.slidefsm.slide)) && !io.slidefsm.exceed_limit_hi)
+        res_update_lo(i) := RegNext((i.U +& io.slidefsm.slide) < n.U)
+
+        src_data_hi_vec(i) := RegNext(io.slidefsm.src_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        src_data_lo_vec(i) := RegNext(io.slidefsm.src_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        prev_data_vec(i)   := RegNext(io.slidefsm.prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+    }
+    
+    val exceed_limit_lo = RegNext(io.slidefsm.exceed_limit_lo)
+
+    // stage-1
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
 
     for(i <- 0 until n) {
-        src_data_hi_vec(i) := io.slidefsm.src_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        src_data_lo_vec(i) := io.slidefsm.src_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        prev_data_vec(i)   := io.slidefsm.prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-    }
-
-    for(i <- 0 until n) {
-        val index = i.U + io.slidefsm.slide
-        val elements_idx = io.slidefsm.mask_start_idx + i.U
-        val res_keep_old_vd = (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && !io.slidefsm.ma) || (elements_idx < io.slidefsm.vstart) || ((elements_idx >= io.slidefsm.vl) && !io.slidefsm.ta)
-        val res_agnostic = ((elements_idx >= io.slidefsm.vl) && io.slidefsm.ta) || (!io.slidefsm.vm && !io.slidefsm.mask(i).asBool && io.slidefsm.ma)
-
-        when( res_keep_old_vd ) {
+        when( res_keep_old_vd(i) ) {
             res_data_vec(i) := prev_data_vec(i)
-        }.elsewhen( res_agnostic ) {
+        }.elsewhen( res_agnostic(i) ) {
             res_data_vec(i) := Fill(VLEN/n, 1.U(1.W))
-        }.elsewhen( io.slidefsm.exceed_limit_lo ){
+        }.elsewhen( exceed_limit_lo ){
             res_data_vec(i) := 0.U((VLEN/n).W)
-        }.elsewhen( (i.U +& io.slidefsm.slide) < n.U ) {
-            res_data_vec(i) := src_data_lo_vec(index)
-        }.elsewhen( (n.U <= (i.U +& io.slidefsm.slide)) && !io.slidefsm.exceed_limit_hi ) {
-            res_data_vec(i) := src_data_hi_vec(index)
+        }.elsewhen( res_update_lo(i) ) {
+            res_data_vec(i) := src_data_lo_vec(index(i))
+        }.elsewhen( res_update_hi(i) ) {
+            res_data_vec(i) := src_data_hi_vec(index(i))
         }.otherwise {
             res_data_vec(i) := 0.U((VLEN/n).W)
         }
@@ -151,10 +177,10 @@ class SlideDownFsmModule extends VPermModule {
         slidedown_fsm_module(i).slidefsm := io.slidefsm
     }
 
-    io.res_data := Mux(io.slidefsm.vstart >= io.slidefsm.vl, io.slidefsm.prev_data, LookupTree(io.slidefsm.sew, List(
+    io.res_data := LookupTree(io.slidefsm.sew, List(
         VectorElementFormat.b -> slidedown_fsm_module_0.io.res_data,
         VectorElementFormat.h -> slidedown_fsm_module_1.io.res_data,
         VectorElementFormat.w -> slidedown_fsm_module_2.io.res_data,
         VectorElementFormat.d -> slidedown_fsm_module_3.io.res_data
-    )))
+    ))
 }

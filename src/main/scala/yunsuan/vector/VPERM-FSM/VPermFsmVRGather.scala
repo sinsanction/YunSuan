@@ -43,40 +43,51 @@ class TableLookupFsm(n: Int) extends VPermModule {
         val res_data = Output(UInt(VLEN.W))
     })
 
+    // stage-0
+    val idx = Wire(Vec(n, UInt(log2Up(n).W)))
+    val res_keep_old_vd = Wire(Vec(n, Bool()))
+    val res_agnostic = Wire(Vec(n, Bool()))
+    val idx_valid_hi = Wire(Vec(n, Bool()))
+    val idx_valid_lo = Wire(Vec(n, Bool()))
     val table_data_hi_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val table_data_lo_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
     val idx_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
+
+    for(i <- 0 until n) {
+        val elements_idx = io.gather.mask_start_idx + i.U
+        idx_data_vec(i) := io.gather.idx_data((VLEN/n)*(i+1)-1, (VLEN/n)*i)
+        val index = Mux(io.gather.idx_is_rs1, io.gather.idx_rs1, idx_data_vec(i))
+
+        res_keep_old_vd(i) := RegNext((!io.gather.vm && !io.gather.mask(i).asBool && !io.gather.ma) || (elements_idx < io.gather.vstart) || ((elements_idx >= io.gather.vl) && !io.gather.ta) || (io.gather.vstart >= io.gather.vl))
+        res_agnostic(i) := RegNext(((elements_idx >= io.gather.vl) && io.gather.ta) || (!io.gather.vm && !io.gather.mask(i).asBool && io.gather.ma))
+        idx_valid_lo(i) := RegNext((io.gather.min_lo <= index) && (index < io.gather.max_lo))
+        idx_valid_hi(i) := RegNext((io.gather.min_hi <= index) && (index < io.gather.max_hi) && io.gather.table_valid_hi)
+
+        table_data_hi_vec(i) := RegNext(io.gather.table_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        table_data_lo_vec(i) := RegNext(io.gather.table_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i))
+        idx(i) := RegNext(index(log2Up(n)-1, 0))
+    }
+
+    val prev_data = RegNext(io.gather.prev_data)
+    val first_op = RegNext(io.gather.first_op)
+
+    // stage-1
     val prev_data_vec = Wire(Vec(n, UInt((VLEN/n).W)))
     val res_data_vec  = Wire(Vec(n, UInt((VLEN/n).W)))
 
     for(i <- 0 until n) {
-        table_data_hi_vec(i) := io.gather.table_data_hi((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        table_data_lo_vec(i) := io.gather.table_data_lo((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        idx_data_vec(i)    := io.gather.idx_data((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-        prev_data_vec(i)   := io.gather.prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i)
-    }
+        prev_data_vec(i) := Mux(first_op, prev_data((VLEN/n)*(i+1)-1, (VLEN/n)*i), io.gather.temp_data((VLEN/n)*(i+1)-1, (VLEN/n)*i))
 
-    for(i <- 0 until n) {
-        val index = Mux(io.gather.idx_is_rs1, io.gather.idx_rs1, idx_data_vec(i))
-        val elements_idx = io.gather.mask_start_idx + i.U
-        val res_keep_old_vd = (!io.gather.vm && !io.gather.mask(i).asBool && !io.gather.ma) || (elements_idx < io.gather.vstart) || ((elements_idx >= io.gather.vl) && !io.gather.ta)
-        val res_agnostic = ((elements_idx >= io.gather.vl) && io.gather.ta) || (!io.gather.vm && !io.gather.mask(i).asBool && io.gather.ma)
-
-        val idx_valid_lo = (io.gather.min_lo <= index) && (index < io.gather.max_lo)
-        val idx_valid_hi = (io.gather.min_hi <= index) && (index < io.gather.max_hi) && io.gather.table_valid_hi
-
-        val idx = index(log2Up(n)-1, 0)
-
-        when( res_keep_old_vd ) {
+        when( res_keep_old_vd(i) ) {
             res_data_vec(i) := prev_data_vec(i)
-        }.elsewhen( res_agnostic ) {
+        }.elsewhen( res_agnostic(i) ) {
             res_data_vec(i) := Fill(VLEN/n, 1.U(1.W))
-        }.elsewhen( !idx_valid_lo && !idx_valid_hi ) {
-            res_data_vec(i) := Mux(io.gather.first_op, 0.U((VLEN/n).W), prev_data_vec(i))
-        }.elsewhen( idx_valid_hi ) {
-            res_data_vec(i) := table_data_hi_vec(idx)
+        }.elsewhen( !idx_valid_lo(i) && !idx_valid_hi(i) ) {
+            res_data_vec(i) := Mux(first_op, 0.U((VLEN/n).W), prev_data_vec(i))
+        }.elsewhen( idx_valid_hi(i) ) {
+            res_data_vec(i) := table_data_hi_vec(idx(i))
         }.otherwise {
-            res_data_vec(i) := table_data_lo_vec(idx)
+            res_data_vec(i) := table_data_lo_vec(idx(i))
         }
     }
 
@@ -99,10 +110,10 @@ class GatherFsmModule extends VPermModule {
         gather_fsm_module(i).gather := io.gather
     }
 
-    io.res_data := Mux(io.gather.vstart >= io.gather.vl, io.gather.prev_data, LookupTree(io.gather.sew, List(
+    io.res_data := LookupTree(io.gather.sew, List(
         VectorElementFormat.b -> gather_fsm_module_0.io.res_data,
         VectorElementFormat.h -> gather_fsm_module_1.io.res_data,
         VectorElementFormat.w -> gather_fsm_module_2.io.res_data,
         VectorElementFormat.d -> gather_fsm_module_3.io.res_data
-    )))
+    ))
 }
