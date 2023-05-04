@@ -23,7 +23,7 @@ class VPermFsmTop extends VPermModule {
     val idle :: recv_preg :: working :: ending :: Nil = Enum(4)
     val state = RegInit(idle)
     val state_next = WireInit(state)
-    val uop_recv = RegInit(VecInit(Seq.fill(8)(false.B)))
+    val uop_recv = RegInit(0.U(8.W))
     val uop_recv_next = WireInit(uop_recv)
     val is_lmul_4 = Wire(Bool())
     val working_done = Wire(Bool())
@@ -54,8 +54,12 @@ class VPermFsmTop extends VPermModule {
         }
     }
 
-    when(state === working) {
-        uop_recv_next.foreach{ next => next := false.B }
+    when((state === idle || state === recv_preg) && viq0_valid) {
+        uop_recv_next := uop_recv | UIntToOH(io.viq(0).uop_idx, 8)
+    }.elsewhen((state === idle || state === recv_preg) && viq1_valid) {
+        uop_recv_next := uop_recv | UIntToOH(io.viq(1).uop_idx, 8)
+    }.elsewhen(state === working) {
+        uop_recv_next := 0.U(8.W)
     }
 
 
@@ -87,15 +91,12 @@ class VPermFsmTop extends VPermModule {
         uopinfo(io.viq(0).uop_idx).old_vd_preg_idx := io.viq(0).old_vd_preg_idx
         uopinfo(io.viq(0).uop_idx).vd_preg_idx := io.viq(0).vd_preg_idx
         uopinfo(io.viq(0).uop_idx).rob_idx := io.viq(0).rob_idx
-        uop_recv_next(io.viq(0).uop_idx) := true.B
-    }
-    when((state === idle || state === recv_preg) && viq1_valid) {
+    }.elsewhen((state === idle || state === recv_preg) && viq1_valid) {
         uopinfo(io.viq(1).uop_idx).vs1_preg_idx := io.viq(1).vs1_preg_idx
         uopinfo(io.viq(1).uop_idx).vs2_preg_idx := io.viq(1).vs2_preg_idx
         uopinfo(io.viq(1).uop_idx).old_vd_preg_idx := io.viq(1).old_vd_preg_idx
         uopinfo(io.viq(1).uop_idx).vd_preg_idx := io.viq(1).vd_preg_idx
         uopinfo(io.viq(1).uop_idx).rob_idx := io.viq(1).rob_idx
-        uop_recv_next(io.viq(1).uop_idx) := true.B
     }
 
     val viq0_is_first_uop = (io.viq(0).uop_idx === 0.U) && viq0_valid
@@ -103,8 +104,7 @@ class VPermFsmTop extends VPermModule {
     val is_first_uop = viq0_is_first_uop || viq1_is_first_uop
     when((state === idle || state === recv_preg) && viq0_valid && viq0_is_first_uop) {
         v0_mask := Mux(io.viq(0).opcode === VPermFsmType.vcompress, io.viq(0).vs1, io.viq(0).mask)
-    }
-    when((state === idle || state === recv_preg) && viq1_valid && viq1_is_first_uop) {
+    }.elsewhen((state === idle || state === recv_preg) && viq1_valid && viq1_is_first_uop) {
         v0_mask := Mux(io.viq(1).opcode === VPermFsmType.vcompress, io.viq(1).vs1, io.viq(1).mask)
     }
 
@@ -173,8 +173,7 @@ class VPermFsmTop extends VPermModule {
 
     when((state === idle || state === recv_preg) && viq0_valid) {
         access_table(io.viq(0).uop_idx) := access_table_viq_0.io.res_data
-    }
-    when((state === idle || state === recv_preg) && viq1_valid) {
+    }.elsewhen((state === idle || state === recv_preg) && viq1_valid) {
         access_table(io.viq(1).uop_idx) := access_table_viq_1.io.res_data
     }
 
