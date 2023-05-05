@@ -88,13 +88,17 @@ class Execinfo extends VPermBundle {
     val valid = Bool()
     val write_vrf = Bool()
     val write_temp = Bool()
+    val first_op = Bool()
     val uop_idx = UInt(3.W)
 
     // gather
-    val first_op = Bool()
     val table_valid_hi = Bool()
     val table_idx_hi = UInt(3.W)
     val table_idx_lo = UInt(3.W)
+
+    // compress
+    val pmos = UInt(8.W)
+    val vs1_mask = UInt(16.W)
 }
 
 object VPermFsmType {
