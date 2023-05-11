@@ -25,11 +25,18 @@ class VPermFsmTop extends VPermModule {
     val state_next = WireInit(state)
     val uop_recv = RegInit(0.U(8.W))
     val uop_recv_next = WireInit(uop_recv)
-    val is_lmul_4 = Wire(Bool())
+    val is_uop_8 = Wire(Bool())
     val working_done = Wire(Bool())
     val ending_done = Wire(Bool())
-    state := state_next
-    uop_recv := uop_recv_next
+
+    val flush_valid = io.flush.br_flush_vld || io.flush.rob_flush_vld
+    when(flush_valid) {
+        state := idle
+        uop_recv := 0.U(8.W)
+    }.otherwise {
+        state := state_next
+        uop_recv := uop_recv_next
+    }
 
     switch(state) {
         is( idle ) {
@@ -38,7 +45,7 @@ class VPermFsmTop extends VPermModule {
             }
         }
         is( recv_preg ) {
-            when( (uop_recv_next.asUInt === "b11111111".U(8.W) && !is_lmul_4) || (uop_recv_next.asUInt === "b00001111".U(8.W) && is_lmul_4) ) {
+            when( (uop_recv_next.asUInt === "b11111111".U(8.W) && is_uop_8) || (uop_recv_next.asUInt === "b00001111".U(8.W) && !is_uop_8) ) {
                 state_next := working
             }
         }
@@ -108,7 +115,7 @@ class VPermFsmTop extends VPermModule {
         v0_mask := Mux(io.viq(1).opcode === VPermFsmType.vcompress, io.viq(1).vs1, io.viq(1).mask)
     }
 
-    is_lmul_4 := vecinfo.lmul_4
+    is_uop_8 := !vecinfo.lmul_4 || vecinfo.lmul_4 && (vecinfo.opcode === VPermFsmType.vrgather16) && (vecinfo.sew === VectorElementFormat.b)
 
     // slide reg
     val slide = Reg(UInt(4.W))
