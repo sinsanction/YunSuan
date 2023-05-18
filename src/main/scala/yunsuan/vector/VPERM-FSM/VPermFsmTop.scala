@@ -61,7 +61,9 @@ class VPermFsmTop extends VPermModule {
         }
     }
 
-    when((state === idle || state === recv_preg) && viq0_valid) {
+    when((state === idle || state === recv_preg) && viq0_valid && viq1_valid) {
+        uop_recv_next := uop_recv | UIntToOH(io.viq(0).uop_idx, 8) | UIntToOH(io.viq(1).uop_idx, 8)
+    }.elsewhen((state === idle || state === recv_preg) && viq0_valid) {
         uop_recv_next := uop_recv | UIntToOH(io.viq(0).uop_idx, 8)
     }.elsewhen((state === idle || state === recv_preg) && viq1_valid) {
         uop_recv_next := uop_recv | UIntToOH(io.viq(1).uop_idx, 8)
@@ -110,9 +112,9 @@ class VPermFsmTop extends VPermModule {
     val viq0_is_first_uop = (io.viq(0).uop_idx === 0.U) && viq0_valid
     val viq1_is_first_uop = (io.viq(1).uop_idx === 0.U) && viq1_valid
     val is_first_uop = viq0_is_first_uop || viq1_is_first_uop
-    when((state === idle || state === recv_preg) && viq0_valid && viq0_is_first_uop) {
+    when((state === idle || state === recv_preg) && viq0_is_first_uop) {
         v0_mask := Mux(io.viq(0).opcode === VPermFsmType.vcompress, io.viq(0).vs1, io.viq(0).mask)
-    }.elsewhen((state === idle || state === recv_preg) && viq1_valid && viq1_is_first_uop) {
+    }.elsewhen((state === idle || state === recv_preg) && viq1_is_first_uop) {
         v0_mask := Mux(io.viq(1).opcode === VPermFsmType.vcompress, io.viq(1).vs1, io.viq(1).mask)
     }
 
@@ -186,8 +188,12 @@ class VPermFsmTop extends VPermModule {
         access_table(io.viq(1).uop_idx) := access_table_viq_1.io.res_data
     }
 
-    //assert(((state === idle || state === recv_preg) && viq0_valid && io.viq(0).lmul_4 && (access_table_viq_0.io.res_data <= 15.U)), "access table 0 has valid bit over 4 when lmul is 4")
-    //assert(((state === idle || state === recv_preg) && viq1_valid && io.viq(1).lmul_4 && (access_table_viq_1.io.res_data <= 15.U)), "access table 1 has valid bit over 4 when lmul is 4")
+    when(io.viq(0).lmul_4) {
+        assert(access_table_viq_0.io.res_data <= 15.U, "access table 0 has valid bit over 4 when lmul is 4")
+    }
+    when(io.viq(1).lmul_4) {
+        assert(access_table_viq_1.io.res_data <= 15.U, "access table 1 has valid bit over 4 when lmul is 4")
+    }
 
     // gather16
     val access_table_16 = Reg(Vec(8, UInt(8.W)))
@@ -434,7 +440,7 @@ class VPermFsmTop extends VPermModule {
         execinfo.table_valid_hi := current_16_table_valid_hi
         execinfo.table_idx_hi := current_16_table_idx_hi
         execinfo.table_idx_lo := current_16_table_idx_lo
-        uop_idx_update := current_is_last && vrf_request_succ
+        uop_idx_update := current_16_is_last && vrf_request_succ
     }.elsewhen(opcode === VPermFsmType.vcompress) {
         rd_preg_idx(0) := uopinfo(src_reg_idx).vs2_preg_idx
         rd_vld(0) := true.B
